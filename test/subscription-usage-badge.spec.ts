@@ -19,6 +19,7 @@ css.deregister()
 import type { ProviderUsageDisplay } from '../src/client/SubscriptionUsageBadge.js'
 import type { UsageWindow } from '../src/client/SubscriptionsSection.js'
 import { en, zh } from '../src/client/locales.js'
+import { visibleUsageWindows } from '../src/client/usage-window-filter.js'
 
 test('media tool views render the preparing phase before arguments are available', () => {
   for (const [Component, name] of [[ImageGenerateToolview, 'image_generate'], [VideoGenerateToolview, 'video_generate']] as const) {
@@ -41,6 +42,29 @@ function display(provider: ProviderUsageDisplay['provider'] = 'antigravity', val
     { key: 'default', isDefault: true, windows: values },
   ] }
 }
+
+test('native shared account panel shows four remaining quotas despite an Argon-only whitelist', () => {
+  const shared: UsageWindow[] = [
+    { kind: 'weekly', scope: 'Gemini Models', usedPercent: 27 },
+    { kind: 'session', scope: 'Gemini Models', usedPercent: 7 },
+    { kind: 'weekly', scope: 'Claude and GPT models', usedPercent: 77 },
+    { kind: 'session', scope: 'Claude and GPT models', usedPercent: 0 },
+  ]
+  const filtered = visibleUsageWindows('antigravity', shared, ['gemini-4-argon-high'])
+  assert.deepEqual(filtered, shared, 'model visibility does not hide account-wide shared quotas')
+  for (const dictionary of [en, zh]) {
+    const translate = (key: keyof typeof en, params?: Record<string, unknown>) =>
+      dictionary[key].replace(/\{(\w+)\}/g, (_, name: string) => String(params?.[name] ?? ''))
+    const html = renderToStaticMarkup(createElement(AccountWindows, {
+      windows: filtered, model: 'gemini-4-argon', provider: 'antigravity', translate,
+    }))
+    assert.equal((html.match(/role="progressbar"/g) ?? []).length, 4)
+    for (const percent of [73, 93, 23, 100]) assert.ok(html.includes(translate('usageRemaining', { percent })))
+    assert.ok(!html.includes('gemini-4-argon-') && !html.includes('<details'))
+    assert.equal(compactSegment(display('antigravity', shared), 'gemini-4-argon', translate),
+      `Antigravity ${translate('usageWeekly')} ${translate('usageRemaining', { percent: 73 })} · ${translate('usageFiveHourLimit')} ${translate('usageRemaining', { percent: 93 })}`)
+  }
+})
 
 test('Antigravity compact readout selects exact current model, not the entire catalog', () => {
   const d = display('antigravity', [...windows, { kind: 'weekly', scope: 'gemini-model-59', usedPercent: 81 }])
